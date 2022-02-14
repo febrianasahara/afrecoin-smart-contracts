@@ -1,7 +1,9 @@
 pragma solidity ^0.8.11;
 
-import "./Stakeable.sol";
+import "./StoreController.sol";
+import "./PartnerController.sol";
 
+import "@openzeppelin/contracts/utils/Context.sol";
 import "@openzeppelin/contracts/utils/math/SafeMath.sol";
 import "@openzeppelin/contracts/utils/Address.sol";
 
@@ -10,7 +12,7 @@ import "@uniswap/v2-core/contracts/interfaces/IUniswapV2Pair.sol";
 import "@uniswap/v2-periphery/contracts/interfaces/IUniswapV2Router01.sol";
 import "@uniswap/v2-periphery/contracts/interfaces/IUniswapV2Router02.sol";
 
-contract TokenV2 is Stakeable {
+contract BWPT is StoreController {
     /**
      * MATH
          0000000000000000000
@@ -18,7 +20,7 @@ contract TokenV2 is Stakeable {
 
     using SafeMath for uint256;
     using Address for address;
-
+   
     /**
      * DATA
      */
@@ -29,20 +31,20 @@ contract TokenV2 is Stakeable {
     // ERC20 BASIC DATA
     mapping(address => uint256) internal balances;
     uint256 internal totalSupply_;
-    bool SUCCESS = true;
-    bool FAIL = true;
+ 
 
-    string public constant name = "BWP Tether"; // solium-disable-line
+    /* IMPORTANT - REQUIRED */
+    address payable private  _GaziniContract; // FEE TOKEN
+    string public constant name = "Fiat-Peg Botswana Pula Token (BWPT)"; // solium-disable-line
     string public constant symbol = "BWPT"; // solium-disable-line uppercase
 
     //  optional ERC20 fees paid to the delegate of betaDelegatedTransfer by the from address.
-    uint8 public transferFee = 3; // fee is swapped for BNB and added to liquidity pool
+    uint8 public transferFee = 3; // 50% fee is swapped into Gazini and sent to rewards wallet
     uint8 public constant decimals = 18; // solium-disable-line uppercase
     uint256 private decimalFactor = 10**decimals;
     uint256 private transactionDeadline = 50; // a block number after which the pre-signed transaction has expired.
     mapping(address => bool) private _isExcludedFromFee;
-    mapping(address => bool) private _isProjectPartner; // all partners that will get a share of the fee (50%)
-    
+     
     // ERC20 DATA
     mapping(address => mapping(address => uint256)) internal allowed;
 
@@ -79,21 +81,34 @@ contract TokenV2 is Stakeable {
     // solhint-disable-next-line var-name-mixedcase
     bytes32 public EIP712_DOMAIN_HASH;
 
-    /* PancakeSwap */
+    /* LIQUIDITY POOLS */
     IUniswapV2Router02 public uniswapV2Router;
-    address public busdPair; // BUSD Liquidity pool
-    address public bnbPair; // BUSD Liquidity pool
-    address public usdtPair; // BUSD Liquidity pool
-    address public usdcPair; // BUSD Liquidity pool
+     /* Ripple (XRP) */
+    address private _xrpPair; // XRP Liquidity pool
+    address payable internal  _xrpContract; 
+
+     /* Ripple (XRP) */
+    address private _bnbPair; // BNB Liquidity pool address
+    address payable internal  _bnbContract; 
+
+    address private _usdtPair; // USDT Liquidity pool
+    address payable internal  _usdtContract; 
+
+    /* Binance-Peg Stellar Token (XLM) */
+    address private _xlmPair; // XLM Liquidity pool
+    address payable internal  _xlmContract; 
+
+    /* Binance-Peg Stellar Token (USDC) */
+    address private _usdcPair; // XLM Liquidity pool
+    address payable internal  _usdcContract; 
+
     uint256 private _liqAmount; // how much liquidity fees to take
     /* OperationalWallets */
     bool takeFeesMutexLock;
 
-    /* Payable fee wallets */
-    address payable constant _developerAddress =
-        payable(0x30FBf4dFE1df1e951A1eBC7A1439Fcf2af45b79f);
-    address payable constant _marketingAddress =
-        payable(0xC54089350afa7ecCEb6d09c9Bf09ff4282E63328);
+    /* Operational  wallet */
+        address payable constant _feeAddress =
+        payable(0x30FBf4dFE1df1e951A1eBC7A1439Fcf2af45b79f); 
 
     /**
      * EVENTS
@@ -189,39 +204,69 @@ contract TokenV2 is Stakeable {
         initializeDomainSeparator();
         unpause();
         // Added from Previous Libs
-        increaseSupply(10**8 * decimalFactor);
-        createPancakeSwapPair();
+        increaseSupply(10**8 * decimalFactor); // 100 million BWPT initial tokens
+        createPancakeSwapLiquidityPools();
     }
 
     function setTransferFee(uint8 fee) public onlyOwner {
         transferFee = fee;
+        
     }
 
-    function addPartner(address partner) public onlyOwner {
-        _isProjectPartner[partner] = true;
-    }
-     function removePartner(address partner) public onlyOwner {
-        _isProjectPartner[partner] = false;
-    }
-
+   
     function getTransactionFee() public view returns (uint8 fee) {
+        
         return transferFee;
     }
+
+    /* Public Project Partner Functions */
+    
+
+
+
 
     // -------> PancakeSwap functions
     receive() external payable {} // to recieve ETH from uniswapV2Router when swaping
 
-    function createPancakeSwapPair() public onlyOwner {
+    function createPancakeSwapLiquidityPools() public onlyOwner {
         // IUniswapV2Router02 _uniswapV2Router = IUniswapV2Router02(0x10ED43C718714eb63d5aA57B78B54704E256024E); // MAINNET
         IUniswapV2Router02 _uniswapV2Router = IUniswapV2Router02(
             0xD99D1c33F9fC3444f8101754aBC46c52416550D1
         ); // TESTNET
+ 
+        /* Set Contract address for the other token pools the transfer fee is distributed  */
+
+        // (Pegged) XRP TESTNET = 0x1D2F0da169ceB9fC7B3144628dB156f3F6c60dBE  || MAINNET = 0x1D2F0da169ceB9fC7B3144628dB156f3F6c60dBE
+        // (USDT) TESTNET = 0x7ef95a0FEE0Dd31b22626fA2e10Ee6A223F8a684   || MAINNET =
+        // (XLM) TESTNET = 0x41e31Fd240BB95d995c1aEE2338c797DD09f5E16  || MAINNET = 0x2d0596a41b29463fc59491b24cb7e58dafeeabf6
 
         // Create a uniswap pair for this new token
-        bnbPair = IUniswapV2Factory(_uniswapV2Router.factory()).createPair(
+        _usdtContract = payable(0x7ef95a0FEE0Dd31b22626fA2e10Ee6A223F8a684);
+        _bnbContract = payable(_uniswapV2Router.WETH());
+        _xrpContract = payable(0x1D2F0da169ceB9fC7B3144628dB156f3F6c60dBE);
+        _xlmContract = payable(0x41e31Fd240BB95d995c1aEE2338c797DD09f5E16);
+        
+        _bnbPair = IUniswapV2Factory(_uniswapV2Router.factory()).createPair(
             address(this),
-            _uniswapV2Router.WETH()
+           _bnbContract
         );
+
+         _xrpPair = IUniswapV2Factory(_uniswapV2Router.factory()).createPair(
+            address(this),
+            _xrpContract
+        );
+        
+        _usdtPair = IUniswapV2Factory(_uniswapV2Router.factory()).createPair(
+            address(this),
+            _usdtContract
+        );
+
+        _xlmPair = IUniswapV2Factory(_uniswapV2Router.factory()).createPair(
+            address(this),
+            _xlmContract
+        );
+        
+
         // TODO
 
         // Set router contract variable
@@ -286,6 +331,9 @@ contract TokenV2 is Stakeable {
             block.timestamp
         );
     }
+
+
+
 
     function _takeFees(uint256 amount, address from) private lockTakeFees {
         // get the total Fee amount
@@ -395,6 +443,33 @@ contract TokenV2 is Stakeable {
         return balances[_addr];
     }
 
+      function getFeeAddress() public view returns (address) {
+        return _GaziniContract;
+    }
+     function getTransferFee() public view returns (uint8) {
+        return transferFee;
+    }
+ 
+     function setFeeAddress(address _addr) external onlyOwner returns (bool) {
+            _GaziniContract = payable(_addr);
+            return true;
+    }
+
+     function getPool_XLM() public view returns (address) {
+        return _xlmPair;
+    }
+
+     function getPool_BNB() public view returns (address) {
+        return _bnbPair;
+    }
+     function getPool_XRP() public view returns (address) {
+        return _xrpPair;
+    }
+
+     function getPool_USDT() public view returns (address) {
+        return _usdtPair;
+    }
+
     // ERC20 FUNCTIONALITY
 
     /**
@@ -420,11 +495,8 @@ contract TokenV2 is Stakeable {
         if (_isExcludedFromFee[_from]) {
             takeFee = false;
         }
-         if (_isProjectPartner[_from]) { 
-             // check to see if the transfer is from a partner
-            takeFee = false;
-        }
-        if (_from != bnbPair && takeFee && _from != owner()) {
+          
+        if (takeFee && _from != owner()) {
             // Take fees from everyone except owners
             // Subtract the transfer amount left after fees
             uint256 totalFeeAmount = _value.mul(transferFee).div(100);
@@ -508,7 +580,7 @@ contract TokenV2 is Stakeable {
         proposedOwner = address(0);
         emit OwnershipTransferDisregarded(_oldProposedOwner);
     }
-
+   
     /**
      * @dev Allows the proposed owner to complete transferring control of the contract to the proposedOwner.
      */

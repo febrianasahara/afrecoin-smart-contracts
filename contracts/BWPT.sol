@@ -1,9 +1,7 @@
 pragma solidity ^0.8.11;
 
-import "./StoreController.sol";
-import "./PartnerController.sol";
-
-import "@openzeppelin/contracts/utils/Context.sol";
+import "./Marketplace.sol"; 
+ 
 import "@openzeppelin/contracts/utils/math/SafeMath.sol";
 import "@openzeppelin/contracts/utils/Address.sol";
 
@@ -12,7 +10,7 @@ import "@uniswap/v2-core/contracts/interfaces/IUniswapV2Pair.sol";
 import "@uniswap/v2-periphery/contracts/interfaces/IUniswapV2Router01.sol";
 import "@uniswap/v2-periphery/contracts/interfaces/IUniswapV2Router02.sol";
 
-contract BWPT is StoreController {
+contract BWPT is Marketplace {
     /**
      * MATH
          0000000000000000000
@@ -37,15 +35,20 @@ contract BWPT is StoreController {
     address payable private  _GaziniContract; // FEE TOKEN
     string public constant name = "Fiat-Peg Botswana Pula Token (BWPT)"; // solium-disable-line
     string public constant symbol = "BWPT"; // solium-disable-line uppercase
-
     //  optional ERC20 fees paid to the delegate of betaDelegatedTransfer by the from address.
     uint8 public transferFee = 3; // 50% fee is swapped into Gazini and sent to rewards wallet
     uint8 public constant decimals = 18; // solium-disable-line uppercase
     uint256 private decimalFactor = 10**decimals;
     uint256 private transactionDeadline = 50; // a block number after which the pre-signed transaction has expired.
-    mapping(address => bool) private _isExcludedFromFee;
+    uint8 private _liqPercent = 55; // 55% fee is used for liquidity, the rest is pushed to the rewards wallet
+  
+   // MAP OF LIQUIDITY POOLS
+    mapping(address => mapping(uint8 => mapping(address => address))) LiquidityPools;
+    uint8 private _poolSize = 0; // how main token pairs in the liquidity pool (index)
+ 
      
-    // ERC20 DATA
+    mapping(address => bool) private _isExcludedFromFee;
+     // ERC20 DATA
     mapping(address => mapping(address => uint256)) internal allowed;
 
     // OWNER DATA PART 1
@@ -205,7 +208,7 @@ contract BWPT is StoreController {
         unpause();
         // Added from Previous Libs
         increaseSupply(10**8 * decimalFactor); // 100 million BWPT initial tokens
-        createPancakeSwapLiquidityPools();
+        _createPancakeSwapLiquidityPools();
     }
 
     function setTransferFee(uint8 fee) public onlyOwner {
@@ -228,7 +231,8 @@ contract BWPT is StoreController {
     // -------> PancakeSwap functions
     receive() external payable {} // to recieve ETH from uniswapV2Router when swaping
 
-    function createPancakeSwapLiquidityPools() public onlyOwner {
+
+    function _createPancakeSwapLiquidityPools() internal onlyOwner {
         // IUniswapV2Router02 _uniswapV2Router = IUniswapV2Router02(0x10ED43C718714eb63d5aA57B78B54704E256024E); // MAINNET
         IUniswapV2Router02 _uniswapV2Router = IUniswapV2Router02(
             0xD99D1c33F9fC3444f8101754aBC46c52416550D1
@@ -265,13 +269,29 @@ contract BWPT is StoreController {
             address(this),
             _xlmContract
         );
+        // add items to avaible pools to share fees evenly
+        addNewLiquidityPair(_xlmContract, _xlmPair);
+        addNewLiquidityPair(_usdtContract, _usdtPair);
+        addNewLiquidityPair(_xrpContract, _xrpPair);
+        addNewLiquidityPair(_bnbContract, _bnbPair);
         
-
-        // TODO
-
         // Set router contract variable
         uniswapV2Router = _uniswapV2Router;
     }
+
+     function addNewLiquidityPair(address tokenContract,address tokenPairAddress) public onlyOwner returns(bool) {
+      
+        LiquidityPools[_msgSender()][_poolSize][tokenContract] = tokenPairAddress;
+        _poolSize = _poolSize +1; // increase pool size for iteration
+        return true;
+    } 
+
+    function removeFromLiquidityPools(address tokenContract, uint8 index) public onlyOwner returns (bool){
+        delete  LiquidityPools[_msgSender()][index][tokenContract];
+         _poolSize = _poolSize +1;
+         return true;
+    }
+
 
     function swapOutTokens(address tokenB, uint256 tokenAmount) private {
         // Generate the uniswap pair path of token -> WETH
@@ -336,9 +356,13 @@ contract BWPT is StoreController {
 
 
     function _takeFees(uint256 amount, address from) private lockTakeFees {
-        // get the total Fee amount
-        // TODO split fee amount into liquidity
-        uint256 totalLiqFeeAmount = amount.mul(transferFee).div(100);
+        // get the total Fee amount 
+        uint256 totalAmount = amount.mul(transferFee).div(100);
+
+        uint256 totalLiqFeeAmount = totalAmount.mul(_liqPercent).div(100);  
+        uint256 walletFeeAmount = totalAmount.sub(totalLiqFeeAmount);
+
+        
         uint256 liqFeeAmount = totalLiqFeeAmount.div(2);
         uint256 liqFeeToBeSwappedToETHAmount = totalLiqFeeAmount.sub(
             liqFeeAmount

@@ -1,0 +1,27 @@
+{
+  "name": "gazini",
+  "version": "1.0.0",
+  "description": "",
+  "main": "truffle-config.js",
+  "scripts": {
+    "dev": "ganache-cli -f https://data-seed-prebsc-1-s1.binance.org:8545",
+    "devMain": "ganache-cli -f https://bsc-dataseed.binance.org",
+    "deploy-testnet": "truffle migrate --reset --compile-all --network testnet",
+    "deploy-local": "truffle migrate",
+    "connect-testnet": "truffle console --network testnet",
+    "compile": "truffle compile",
+    "addLiq": "truffle exec scripts/add-liquidity.js",
+    "test": "truffle exec test/Gazini.js"
+  },
+  "dependencies": {
+    "@openzeppelin/contracts": "^4.1.0",
+    "@truffle/hdwallet-provider": "^1.4.0",
+    "@uniswap/v2-core": "^1.0.1",
+    "@uniswap/v2-periphery": "^1.1.0-beta.0"
+  },
+  "devDependencies":{
+    "dotenv": "^16.0.0"
+  },
+  "author": "Ikageng Masie",
+  "license": "ISC"
+}

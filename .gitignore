@@ -1,0 +1,6 @@
+/node_modules
+.env
+package-lock.json
+soljson-v0.8.11+commit.d7f03943.json
+.vscode
+/build

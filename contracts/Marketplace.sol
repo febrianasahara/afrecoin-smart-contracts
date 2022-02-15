@@ -7,6 +7,8 @@ import "@openzeppelin/contracts/utils/Strings.sol";
 
 import "@openzeppelin/contracts/utils/math/SafeMath.sol";
 
+/* TODO : Add/Update/Remove Stores + Create Receipt  */
+
 contract Marketplace is Ownable { 
     using SafeMath for uint256;
      using SafeMath for uint32;
@@ -39,9 +41,7 @@ contract Marketplace is Ownable {
       struct StoreFront {
         uint256 id;
         string name;
-        string shortCode;
-        Category[] sections;
-        Product[] products;
+        string shortCode; 
     }
     /* EVENTS */
     event InventoryQuantityChanged(address s, uint t, uint f,uint256 prdId, uint diff, uint256 dt);
@@ -49,25 +49,30 @@ contract Marketplace is Ownable {
     event CategoryAdded(address s, Category c);
     event CategoryUpdated(address s, Category c);
     
-    event ProductAdded(address s, Product p);
+    event NewProductAdded(address seller, Product product);
     event ProductRemoved(bool completed);
      
-    event DiscountApplied(address s,uint256 catId, uint256 prdId, uint32 disc, uint256 dt);
-    event ProductFetch(Product p, uint256 timestamp); //public 
-    event GetCategorysProduct(Product p, uint256 timestamp); //public  
-    event GetStore(StoreFront store); //public   
+    event DiscountApplied(address sender,Product product, uint32 discount, uint256 date);
+    event ProductFetch(Product product, uint256 timestamp); //public 
+    event GetCategorysProduct(Product products, uint256 timestamp); //public  
+    event StoreRetrieved(StoreFront store); //public   
+    event AddedToCart(Product[] updatedCart); //public   
+    event CartCleared(); //public    
 
 
     Product p; // variable to 
     Category c; 
+    Product[] currentCart;
+    int private productCount = 0;
+    mapping(address => mapping(address =>  mapping(uint256 => StoreFront))) _stores;
     mapping(address => mapping(address =>  mapping(uint256 => Category))) _categories;
     mapping(address => mapping(address => mapping(uint256 => mapping(uint256 => Product)))) _products; // map of all products
     mapping(address => mapping(address => mapping(uint256 => mapping(uint256 => uint)))) _quantities; // map of all product quantities
     mapping(address => mapping(address => mapping(uint256 => mapping(uint256 => uint32)))) _discounts; // map of all product discounts percentages
  
     // cart logic   sender // buyer // category // productId // price (less discounts) //
-     mapping(address => mapping(address => mapping(uint256 => mapping(uint256 => mapping(uint => uint))))) _lineItems; //with quanities
-   
+     mapping(address => mapping(address => mapping(string => Product[]))) _cart; //with quanities
+     
      function addProduct( 
         string calldata _productName, 
         uint256  _category,
@@ -92,7 +97,7 @@ contract Marketplace is Ownable {
          _discounts[_msgSender()][_soldBy][_category][_i] = 0;
         // add the product to the list of indexes
 
-        emit ProductAdded( _soldBy,p);
+        emit NewProductAdded( _soldBy,p);
         return true;
      }
 
@@ -149,17 +154,26 @@ contract Marketplace is Ownable {
     
     
     
-    function getProductByIdAsync(address _seller,  uint256 _categoryId, uint256  _prodId) public onlyOwner   {
+    function GetProductByIdAsync(address _seller,  uint256 _categoryId, uint256  _prodId) public  {
         Product storage p =_products[_msgSender()][_seller][_categoryId][_prodId];
         emit  ProductFetch(p , block.timestamp);
 
     }
-  function addToCart(address _seller,address _buyer,  uint256 _categoryId, uint256  _prodId, uint qty) public onlyOwner   {
-        _lineItems[_seller][_buyer][_categoryId][_prodId] = qty;
-        emit  ProductFetch(p , block.timestamp);
+  function addToCart(address _buyer,address _seller, string calldata _sessionId, uint256 _categoryId, uint256  _prodId, uint qty) public onlyOwner   {
+        currentCart= _cart[_msgSender()][_buyer][_sessionId];
+        currentCart.push(_products[_msgSender()][_seller][_categoryId][_prodId]);
+        _cart[_seller][_buyer][_sessionId] = currentCart; 
+        emit  AddedToCart(currentCart);
+}
 
+    function clearCart(address buyer, address seller, string calldata session) public onlyOwner returns(bool){
+        delete  _cart[seller][buyer][session];
+        emit CartCleared();
+        return true;
     }
+
+
 
    
-    }
+}
      
